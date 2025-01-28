@@ -304,7 +304,8 @@ function authentik_CreateAccount(array $params) {
             null
         );
 
-        if ($httpCode === 201 || $httpCode === 200) {
+        // HTTP 204 means success with no content, which is normal for this operation
+        if ($httpCode === 204 || $httpCode === 200 || $httpCode === 201) {
             logModuleCall(
                 'authentik',
                 'CreateAccount_Success',
@@ -325,7 +326,6 @@ function authentik_CreateAccount(array $params) {
                 'password' => $password,
                 'authentik_url' => rtrim($baseUrl, '/'),
             ];
-
             sendMessage($templateName, $clientId, $templateVars);
 
             logModuleCall(
@@ -352,7 +352,8 @@ function authentik_CreateAccount(array $params) {
             'Failed to add user to group',
             null
         );
-        return "Failed to add user to group. HTTP Code: " . $httpCode . ". Response: " . $response;
+
+        return "Failed to add user to group. HTTP Code: " . $httpCode . ($response ? ". Response: " . $response : "");
 
     } catch (Exception $e) {
         logModuleCall(
