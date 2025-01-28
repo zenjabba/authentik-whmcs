@@ -85,6 +85,14 @@ function authentik_CreateAccount(array $params) {
         // Generate a secure random password
         $password = generateStrongPassword();
 
+        // Store credentials in tblhosting
+        Capsule::table('tblhosting')
+            ->where('id', $params['serviceid'])
+            ->update([
+                'username' => $username,
+                'password' => encrypt($password)
+            ]);
+
         // Log the final username being used
         logModuleCall(
             'authentik',
@@ -389,9 +397,29 @@ function authentik_TerminateAccount(array $params) {
     try {
         $baseUrl = $params['configoption1'];
         $token = $params['configoption2'];
+        
+        // Get the stored username from tblhosting
+        $username = Capsule::table('tblhosting')
+            ->where('id', $params['serviceid'])
+            ->value('username');
+
+        if (!$username) {
+            throw new Exception('Could not find stored username for service');
+        }
+
+        // Log the termination attempt
+        logModuleCall(
+            'authentik',
+            'TerminateAccount',
+            [
+                'username' => $username
+            ],
+            'Attempting to terminate account',
+            null
+        );
 
         // First, get the user ID
-        $userUrl = $baseUrl . '/api/v3/core/users/?username=' . urlencode($params['username']);
+        $userUrl = $baseUrl . '/api/v3/core/users/?username=' . urlencode($username);
         
         $ch = curl_init();
         curl_setopt_array($ch, [
@@ -481,9 +509,30 @@ function authentik_SuspendAccount(array $params) {
         $baseUrl = $params['configoption1'];
         $token = $params['configoption2'];
         $groupName = $params['configoption3'];
+        
+        // Get the stored username from tblhosting
+        $username = Capsule::table('tblhosting')
+            ->where('id', $params['serviceid'])
+            ->value('username');
+
+        if (!$username) {
+            throw new Exception('Could not find stored username for service');
+        }
+
+        // Log the suspension attempt
+        logModuleCall(
+            'authentik',
+            'SuspendAccount',
+            [
+                'username' => $username,
+                'group' => $groupName
+            ],
+            'Attempting to suspend account',
+            null
+        );
 
         // First, get the user ID
-        $userUrl = $baseUrl . '/api/v3/core/users/?username=' . urlencode($params['username']);
+        $userUrl = $baseUrl . '/api/v3/core/users/?username=' . urlencode($username);
         
         $ch = curl_init();
         curl_setopt_array($ch, [
@@ -593,4 +642,6 @@ function authentik_SuspendAccount(array $params) {
         );
         return 'Error: ' . $e->getMessage();
     }
-} 
+}
+
+// End of file
