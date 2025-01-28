@@ -101,9 +101,8 @@ function authentik_CreateAccount(array $params) {
             'username' => $username,
             'email' => $params['clientsdetails']['email'],
             'name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
-            'password' => $password,
-            'is_active' => true,
             'path' => 'if/flow/initial-setup',
+            'is_active' => true,
             'attributes' => [
                 'settings' => [
                     'mfa_required' => true,
@@ -111,6 +110,25 @@ function authentik_CreateAccount(array $params) {
                 ]
             ]
         ];
+
+        // Set password separately to ensure it's included in the request
+        $passwordData = [
+            'password' => $password
+        ];
+        $userData = array_merge($userData, $passwordData);
+
+        // Debug log to verify password is in request (mask actual password)
+        logModuleCall(
+            'authentik',
+            'PasswordVerification',
+            [
+                'has_password' => isset($userData['password']),
+                'password_length' => strlen($userData['password']),
+                'request_data' => array_merge($userData, ['password' => '********'])
+            ],
+            'Verifying password is in request',
+            null
+        );
 
         // Log the user creation request (mask password in logs)
         logModuleCall(
