@@ -189,9 +189,11 @@ function authentik_CreateAccount(array $params) {
 
         $groupId = $groups['results'][0]['pk'];
 
-        // Add user to group
-        $addToGroupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/' . $groupId . '/users/';
-        $groupData = ['pk' => $userId];
+        // Add user to group using the correct endpoint
+        $addToGroupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/' . $groupId . '/add_user/';
+        $groupData = [
+            'pk' => $userId
+        ];
 
         $ch = curl_init();
         curl_setopt_array($ch, [
@@ -221,7 +223,7 @@ function authentik_CreateAccount(array $params) {
             "HTTP Code: {$httpCode}"
         );
 
-        if ($httpCode === 204 || $httpCode === 200) {
+        if ($httpCode === 204 || $httpCode === 200 || $httpCode === 201) {
             // Send welcome email with credentials
             $command = 'SendEmail';
             $postData = array(
