@@ -593,7 +593,7 @@ function authentik_TerminateAccount(array $params) {
  * Suspend a user account in Authentik
  *
  * This function is called when a service is suspended in WHMCS.
- * It removes the user from the specified group in Authentik.
+ * It deactivates the user in Authentik.
  *
  * @param array $params Module configuration parameters
  * @return string Success or error message
@@ -602,7 +602,6 @@ function authentik_SuspendAccount(array $params) {
     try {
         $baseUrl = $params['configoption1'];
         $token = $params['configoption2'];
-        $groupName = $params['configoption3'];
         
         // Get the stored username from tblhosting
         $username = Capsule::table('tblhosting')
@@ -618,8 +617,7 @@ function authentik_SuspendAccount(array $params) {
             'authentik',
             'SuspendAccount',
             [
-                'username' => $username,
-                'group' => $groupName
+                'username' => $username
             ],
             'Attempting to suspend account',
             null
@@ -663,13 +661,19 @@ function authentik_SuspendAccount(array $params) {
 
         $userId = $userData['results'][0]['pk'];
 
-        // Get the group ID
-        $groupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/?name=' . urlencode($groupName);
+        // Deactivate the user
+        $updateUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/' . $userId . '/';
         
+        $updateData = [
+            'is_active' => false
+        ];
+
         $ch = curl_init();
         curl_setopt_array($ch, [
-            CURLOPT_URL => $groupUrl,
+            CURLOPT_URL => $updateUrl,
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CUSTOMREQUEST => 'PATCH',
+            CURLOPT_POSTFIELDS => json_encode($updateData),
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $token,
                 'Content-Type: application/json'
@@ -680,63 +684,25 @@ function authentik_SuspendAccount(array $params) {
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        $groups = json_decode($response, true);
-        
-        // Log the group search response
+        // Log the deactivation response
         logModuleCall(
             'authentik',
-            'FindGroup',
+            'DeactivateUser',
             [
-                'url' => $groupUrl,
-                'response' => $groups,
-                'httpCode' => $httpCode
-            ],
-            'Searching for group',
-            null
-        );
-
-        if (!isset($groups['results']) || empty($groups['results'])) {
-            throw new Exception("Group '{$groupName}' not found");
-        }
-
-        $groupId = $groups['results'][0]['pk'];
-
-        // Remove user from group
-        $removeFromGroupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/' . $groupId . '/users/' . $userId . '/';
-        
-        $ch = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL => $removeFromGroupUrl,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_CUSTOMREQUEST => 'DELETE',
-            CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer ' . $token,
-                'Content-Type: application/json'
-            ]
-        ]);
-
-        $response = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        // Log the removal response
-        logModuleCall(
-            'authentik',
-            'RemoveUserFromGroup',
-            [
-                'url' => $removeFromGroupUrl,
+                'url' => $updateUrl,
+                'data' => $updateData,
                 'httpCode' => $httpCode,
                 'response' => $response
             ],
-            'User removal from group response',
+            'User deactivation response',
             null
         );
 
-        if ($httpCode === 204 || $httpCode === 200) {
+        if ($httpCode === 200) {
             return 'success';
         }
 
-        throw new Exception("Failed to remove user from group '{$groupName}'. HTTP Code: " . $httpCode . ($response ? ". Response: " . $response : ""));
+        throw new Exception("Failed to deactivate user. HTTP Code: " . $httpCode . ($response ? ". Response: " . $response : ""));
 
     } catch (Exception $e) {
         logModuleCall(
