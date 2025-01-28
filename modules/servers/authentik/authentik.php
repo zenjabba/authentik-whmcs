@@ -79,20 +79,11 @@ function authentik_CreateAccount(array $params) {
         $token = $params['configoption2'];
         $groupName = $params['configoption3'];
         
-        // Generate unique username
-        $username = generateUniqueUsername($params);
+        // Use WHMCS-provided username if available, otherwise generate one
+        $username = !empty($params['username']) ? $params['username'] : generateUniqueUsername($params);
         
-        // Generate a secure random password
-        $password = generateStrongPassword();
-
-        // Store credentials in tblhosting without encryption
-        // WHMCS will handle the encryption internally
-        Capsule::table('tblhosting')
-            ->where('id', $params['serviceid'])
-            ->update([
-                'username' => $username,
-                'password' => $password  // WHMCS will encrypt this automatically
-            ]);
+        // Use WHMCS-provided password
+        $password = $params['password'];
 
         // Create user in Authentik
         $createUserUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/';
@@ -101,8 +92,9 @@ function authentik_CreateAccount(array $params) {
             'username' => $username,
             'email' => $params['clientsdetails']['email'],
             'name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
-            'path' => 'if/flow/initial-setup',
+            'password' => $password,
             'is_active' => true,
+            'path' => 'if/flow/initial-setup',
             'attributes' => [
                 'settings' => [
                     'mfa_required' => true,
@@ -110,25 +102,6 @@ function authentik_CreateAccount(array $params) {
                 ]
             ]
         ];
-
-        // Set password separately to ensure it's included in the request
-        $passwordData = [
-            'password' => $password
-        ];
-        $userData = array_merge($userData, $passwordData);
-
-        // Debug log to verify password is in request (mask actual password)
-        logModuleCall(
-            'authentik',
-            'PasswordVerification',
-            [
-                'has_password' => isset($userData['password']),
-                'password_length' => strlen($userData['password']),
-                'request_data' => array_merge($userData, ['password' => '********'])
-            ],
-            'Verifying password is in request',
-            null
-        );
 
         // Log the user creation request (mask password in logs)
         logModuleCall(
@@ -252,8 +225,8 @@ function authentik_CreateAccount(array $params) {
                 'customvars' => base64_encode(serialize(array(
                     'client_name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
                     'authentik_url' => rtrim($baseUrl, '/'),
-                    'username' => $username,
-                    'password' => $password,
+                    'service_username' => $username,
+                    'service_password' => $password,
                 ))),
             );
 

@@ -5,8 +5,8 @@ Your Authentik account has been successfully created.
 You can access your account using the following details:
 
 URL: {$authentik_url}
-Username: {$username}
-Password: {$password}
+Username: {$service_username}
+Password: {$service_password}
 
 Important: Two-Factor Authentication (2FA) is required for your account. When you first log in, you will be guided through the 2FA setup process. You will need an authenticator app on your phone (such as Google Authenticator, Authy, or Microsoft Authenticator) to complete this setup.
 
