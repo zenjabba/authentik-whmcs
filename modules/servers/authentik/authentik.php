@@ -88,33 +88,17 @@ function authentik_CreateAccount(array $params) {
         $token = $params['configoption2'];
         $groupName = $params['configoption3'];
         
-        // Generate unique username
+        // Generate unique username and password
         $username = generateUniqueUsername($params);
-
-        // Generate a simple password that we know will work
         $password = generateSimplePassword(12);
 
-        // Update WHMCS with the new password
+        // Store credentials in WHMCS
         Capsule::table('tblhosting')
             ->where('id', $params['serviceid'])
             ->update([
                 'username' => $username,
                 'password' => encrypt($password)
             ]);
-
-        // Log all available password-related fields (safely)
-        logModuleCall(
-            'authentik',
-            'PasswordDebug',
-            [
-                'password_length' => strlen($password),
-                'password_is_set' => !empty($password),
-                'is_generated' => true,
-                'password_for_debug' => $password // Temporary for debugging
-            ],
-            'Generated new password',
-            null
-        );
 
         // Create user in Authentik
         $createUserUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/';
@@ -125,28 +109,15 @@ function authentik_CreateAccount(array $params) {
             'name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
             'password' => $password,
             'is_active' => true,
-            'path' => 'if/flow/initial-setup',
+            'path' => 'if/flow/initial-setup',  // Removed trailing slash
             'attributes' => [
                 'settings' => [
+                    'force_password_change' => true,
                     'mfa_required' => true,
                     'mfa_method_preferred' => 'totp'
                 ]
             ]
         ];
-
-        // Log the exact data being sent (with password for debugging)
-        logModuleCall(
-            'authentik',
-            'CreateUser_Request',
-            [
-                'url' => $createUserUrl,
-                'data' => $userData,
-                'password_being_sent' => $password,
-                'json_data' => json_encode($userData)
-            ],
-            'Data being sent to Authentik',
-            null
-        );
 
         // Create user API call
         $ch = curl_init();
@@ -163,24 +134,7 @@ function authentik_CreateAccount(array $params) {
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        
-        // Get detailed curl info for debugging
-        $curlInfo = curl_getinfo($ch);
         curl_close($ch);
-
-        // Log the complete response and curl info
-        logModuleCall(
-            'authentik',
-            'CreateUser_Response',
-            [
-                'httpCode' => $httpCode,
-                'response' => $response,
-                'curl_info' => $curlInfo,
-                'response_decoded' => json_decode($response, true)
-            ],
-            'Complete API response',
-            null
-        );
 
         if ($httpCode !== 201) {
             throw new Exception('Failed to create user: ' . $response);
@@ -193,6 +147,132 @@ function authentik_CreateAccount(array $params) {
         }
 
         $userId = $userData['pk'];
+
+        // Explicitly set the password
+        $setPasswordUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/' . $userId . '/set_password/';
+        
+        $passwordData = [
+            'password' => $password
+        ];
+
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $setPasswordUrl,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($passwordData),
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json'
+            ]
+        ]);
+
+        $setPasswordResponse = curl_exec($ch);
+        $setPasswordHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($setPasswordHttpCode !== 200 && $setPasswordHttpCode !== 201 && $setPasswordHttpCode !== 204) {
+            throw new Exception('Failed to set password: ' . $setPasswordResponse);
+        }
+
+        // After setting password, set user stage to password change
+        $setStageUrl = rtrim($baseUrl, '/') . '/api/v3/stages/prompt/stages/';
+        
+        $stageData = [
+            'name' => 'Password Change Stage - ' . $username,
+            'flows' => ['initial-setup'],
+            'fields' => [
+                [
+                    'field_key' => 'password',
+                    'label' => 'New Password',
+                    'type' => 'password',
+                    'required' => true,
+                    'placeholder' => 'Enter your new password'
+                ],
+                [
+                    'field_key' => 'password_repeat',
+                    'label' => 'Confirm New Password',
+                    'type' => 'password',
+                    'required' => true,
+                    'placeholder' => 'Confirm your new password'
+                ]
+            ]
+        ];
+
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $setStageUrl,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($stageData),
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json'
+            ]
+        ]);
+
+        $stageResponse = curl_exec($ch);
+        $stageHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($stageHttpCode !== 200 && $stageHttpCode !== 201 && $stageHttpCode !== 204) {
+            logModuleCall(
+                'authentik',
+                'SetStage_Error',
+                [
+                    'error' => 'Failed to set password change stage',
+                    'response' => $stageResponse,
+                    'http_code' => $stageHttpCode
+                ],
+                null,
+                null
+            );
+        }
+
+        // Set MFA policy
+        $policyUrl = rtrim($baseUrl, '/') . '/api/v3/policies/bindings/';
+        
+        $policyData = [
+            'policy' => [
+                'name' => 'MFA Required - ' . $username,
+                'execution_logging' => true,
+                'component' => 'authentik_stages_authenticator_validate',
+                'enabled' => true
+            ],
+            'target' => $userId,
+            'enabled' => true,
+            'order' => 0
+        ];
+
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $policyUrl,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($policyData),
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json'
+            ]
+        ]);
+
+        $policyResponse = curl_exec($ch);
+        $policyHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($policyHttpCode !== 200 && $policyHttpCode !== 201 && $policyHttpCode !== 204) {
+            logModuleCall(
+                'authentik',
+                'SetPolicy_Error',
+                [
+                    'error' => 'Failed to set MFA policy',
+                    'response' => $policyResponse,
+                    'http_code' => $policyHttpCode
+                ],
+                null,
+                null
+            );
+        }
 
         // Get the group ID
         $groupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/?name=' . urlencode($groupName);
@@ -218,7 +298,7 @@ function authentik_CreateAccount(array $params) {
 
         $groupId = $groups['results'][0]['pk'];
 
-        // Add user to group using the correct endpoint
+        // Add user to group
         $addToGroupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/' . $groupId . '/add_user/';
         $groupData = [
             'pk' => $userId
@@ -240,18 +320,6 @@ function authentik_CreateAccount(array $params) {
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        logModuleCall(
-            'authentik',
-            'AddUserToGroup',
-            [
-                'url' => $addToGroupUrl,
-                'userId' => $userId,
-                'groupId' => $groupId
-            ],
-            $response,
-            "HTTP Code: {$httpCode}"
-        );
-
         if ($httpCode === 204 || $httpCode === 200 || $httpCode === 201) {
             // Send welcome email with credentials
             $command = 'SendEmail';
@@ -269,14 +337,6 @@ function authentik_CreateAccount(array $params) {
             );
 
             $results = localAPI($command, $postData);
-            
-            logModuleCall(
-                'authentik',
-                'SendEmail',
-                array_merge($postData, ['customvars' => '********']),
-                $results,
-                'Sending welcome email'
-            );
             
             return 'success';
         }

@@ -1,18 +1,21 @@
 Dear {$client_name},
 
-Your Authentik account has been successfully created.
+Your Authentik account has been created. Here are your initial login credentials:
 
-You can access your account using the following details:
-
-URL: {$authentik_url}
 Username: {$service_username}
-Password: {$service_password}
+Temporary Password: {$service_password}
 
-Important: Two-Factor Authentication (2FA) is required for your account. When you first log in, you will be guided through the 2FA setup process. You will need an authenticator app on your phone (such as Google Authenticator, Authy, or Microsoft Authenticator) to complete this setup.
+Login URL: {$authentik_url}
 
-For security reasons, we recommend changing your password after your first login.
+IMPORTANT: On your first login, you will be required to:
+1. Change your password
+2. Set up Two-Factor Authentication (2FA) using an authenticator app
 
-If you have any questions or need assistance, please don't hesitate to contact our support team.
+To prepare for this:
+1. Download an authenticator app if you don't have one already (such as Google Authenticator, Authy, or Microsoft Authenticator)
+2. Have your mobile device ready to scan the QR code during the 2FA setup
+
+These security measures are in place to protect your account. If you need assistance, please contact our support team.
 
 Best regards,
 Your Support Team
