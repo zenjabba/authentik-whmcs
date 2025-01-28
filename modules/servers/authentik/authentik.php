@@ -124,16 +124,17 @@ function authentik_CreateAccount(array $params) {
             ]
         ];
 
-        // Log what we're sending to Authentik (safely)
+        // Log the exact data being sent (with password for debugging)
         logModuleCall(
             'authentik',
-            'CreateUser_PasswordVerification',
+            'CreateUser_Request',
             [
-                'password_length' => strlen($userData['password']),
-                'password_empty' => empty($userData['password']),
-                'password_null' => is_null($userData['password'])
+                'url' => $createUserUrl,
+                'data' => $userData,  // Temporarily log full data including password
+                'password_being_sent' => $password,
+                'json_data' => json_encode($userData)
             ],
-            'Verifying password being sent to Authentik',
+            'Data being sent to Authentik',
             null
         );
 
