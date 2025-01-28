@@ -79,11 +79,18 @@ function authentik_CreateAccount(array $params) {
         $token = $params['configoption2'];
         $groupName = $params['configoption3'];
         
-        // Use WHMCS-provided username if available, otherwise generate one
-        $username = !empty($params['username']) ? $params['username'] : generateUniqueUsername($params);
+        // Generate unique username
+        $username = generateUniqueUsername($params);
         
         // Use WHMCS-provided password
         $password = $params['password'];
+
+        // Store username in WHMCS
+        Capsule::table('tblhosting')
+            ->where('id', $params['serviceid'])
+            ->update([
+                'username' => $username
+            ]);
 
         // Create user in Authentik
         $createUserUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/';
@@ -156,7 +163,7 @@ function authentik_CreateAccount(array $params) {
 
         $userId = $userData['pk'];
 
-        // Now add user to group
+        // Get the group ID
         $groupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/?name=' . urlencode($groupName);
         
         $ch = curl_init();
@@ -215,6 +222,18 @@ function authentik_CreateAccount(array $params) {
         );
 
         if ($httpCode === 204 || $httpCode === 200 || $httpCode === 201) {
+            // Log the actual password being used (masked)
+            logModuleCall(
+                'authentik',
+                'PasswordVerification',
+                [
+                    'password_length' => strlen($password),
+                    'password_is_set' => !empty($password)
+                ],
+                'Verifying password before email',
+                null
+            );
+
             // Send welcome email with credentials
             $command = 'SendEmail';
             $postData = array(
@@ -226,7 +245,7 @@ function authentik_CreateAccount(array $params) {
                     'client_name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
                     'authentik_url' => rtrim($baseUrl, '/'),
                     'service_username' => $username,
-                    'service_password' => $password,
+                    'service_password' => $params['password'], // Use original password parameter
                 ))),
             );
 
