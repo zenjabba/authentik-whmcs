@@ -73,6 +73,15 @@ function authentik_ConfigOptions() {
  * @param array $params Module configuration parameters
  * @return string Success or error message
  */
+function generateSimplePassword($length = 12) {
+    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    $password = '';
+    for ($i = 0; $i < $length; $i++) {
+        $password .= $chars[random_int(0, strlen($chars) - 1)];
+    }
+    return $password;
+}
+
 function authentik_CreateAccount(array $params) {
     try {
         $baseUrl = $params['configoption1'];
@@ -82,15 +91,15 @@ function authentik_CreateAccount(array $params) {
         // Generate unique username
         $username = generateUniqueUsername($params);
 
-        // Generate a new password using WHMCS's functionality
-        $password = generateFriendlyPassword();  // This is a WHMCS function
+        // Generate a simple password that we know will work
+        $password = generateSimplePassword(12);
 
         // Update WHMCS with the new password
         Capsule::table('tblhosting')
             ->where('id', $params['serviceid'])
             ->update([
                 'username' => $username,
-                'password' => encrypt($password)  // Use WHMCS's encrypt function
+                'password' => encrypt($password)
             ]);
 
         // Log all available password-related fields (safely)
@@ -100,7 +109,8 @@ function authentik_CreateAccount(array $params) {
             [
                 'password_length' => strlen($password),
                 'password_is_set' => !empty($password),
-                'is_generated' => true
+                'is_generated' => true,
+                'password_for_debug' => $password // Temporary for debugging
             ],
             'Generated new password',
             null
@@ -130,7 +140,7 @@ function authentik_CreateAccount(array $params) {
             'CreateUser_Request',
             [
                 'url' => $createUserUrl,
-                'data' => $userData,  // Temporarily log full data including password
+                'data' => $userData,
                 'password_being_sent' => $password,
                 'json_data' => json_encode($userData)
             ],
@@ -138,15 +148,13 @@ function authentik_CreateAccount(array $params) {
             null
         );
 
-        // Create user API call with explicit JSON encoding
-        $jsonData = json_encode($userData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-
+        // Create user API call
         $ch = curl_init();
         curl_setopt_array($ch, [
             CURLOPT_URL => $createUserUrl,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $jsonData,
+            CURLOPT_POSTFIELDS => json_encode($userData),
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $token,
                 'Content-Type: application/json'
@@ -155,17 +163,22 @@ function authentik_CreateAccount(array $params) {
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        
+        // Get detailed curl info for debugging
+        $curlInfo = curl_getinfo($ch);
         curl_close($ch);
 
-        // Log the response (without sensitive data)
+        // Log the complete response and curl info
         logModuleCall(
             'authentik',
             'CreateUser_Response',
             [
                 'httpCode' => $httpCode,
-                'response' => $response
+                'response' => $response,
+                'curl_info' => $curlInfo,
+                'response_decoded' => json_decode($response, true)
             ],
-            'User creation response received',
+            'Complete API response',
             null
         );
 
@@ -251,7 +264,7 @@ function authentik_CreateAccount(array $params) {
                     'client_name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
                     'authentik_url' => rtrim($baseUrl, '/'),
                     'service_username' => $username,
-                    'service_password' => $password,  // Use our generated password
+                    'service_password' => $password,
                 ))),
             );
 
