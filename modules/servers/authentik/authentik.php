@@ -331,6 +331,89 @@ function authentik_CreateAccount(array $params) {
                 null
             );
 
+            // Create a policy binding for 2FA requirement
+            $policyUrl = rtrim($baseUrl, '/') . '/api/v3/policies/bindings/';
+            
+            $policyData = [
+                'policy' => [
+                    'name' => 'require-2fa-' . $username,
+                    'execution_logging' => true,
+                    'component' => 'authentik_stages_authenticator_validate',
+                    'pbm' => 'any'
+                ],
+                'group' => $groupId,
+                'enabled' => true,
+                'order' => 0,
+                'timeout' => 30,
+                'failure_result' => false
+            ];
+
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $policyUrl,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_POSTFIELDS => json_encode($policyData),
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $token,
+                    'Content-Type: application/json'
+                ]
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            logModuleCall(
+                'authentik',
+                'CreatePolicyBinding',
+                [
+                    'url' => $policyUrl,
+                    'data' => $policyData
+                ],
+                $response,
+                "HTTP Code: {$httpCode}"
+            );
+
+            // Set user attributes to require 2FA
+            $userUpdateUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/' . $userId . '/';
+            
+            $updateData = [
+                'attributes' => [
+                    'settings' => [
+                        'mfa_required' => true,
+                        'mfa_method_preferred' => 'totp'
+                    ]
+                ]
+            ];
+
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $userUpdateUrl,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_CUSTOMREQUEST => 'PATCH',
+                CURLOPT_POSTFIELDS => json_encode($updateData),
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $token,
+                    'Content-Type: application/json'
+                ]
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            logModuleCall(
+                'authentik',
+                'UpdateUser2FASettings',
+                [
+                    'url' => $userUpdateUrl,
+                    'data' => $updateData
+                ],
+                $response,
+                "HTTP Code: {$httpCode}"
+            );
+
             // Send welcome email with credentials (use unencrypted password)
             $command = 'SendEmail';
             $values = array(
