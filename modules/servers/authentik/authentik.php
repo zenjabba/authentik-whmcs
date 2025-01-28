@@ -319,21 +319,27 @@ function authentik_CreateAccount(array $params) {
 
             // Send email to client with their Authentik credentials
             $clientId = $params['clientsdetails']['userid'];
-            $templateName = 'Authentik Account Created';
+            $templateName = 'Authentik Welcome Email';
             $templateVars = [
                 'client_name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
                 'username' => $username,
                 'password' => $password,
                 'authentik_url' => rtrim($baseUrl, '/'),
+                'service_id' => $params['serviceid'],
+                'service_product' => $params['configoption1'],
+                'client_id' => $clientId,
             ];
-            sendMessage($templateName, $clientId, $templateVars);
+
+            // Use WHMCS's sendMessage function with proper template variables
+            sendMessage($templateName, $clientId, $templateVars, true);  // Added true for admin notification
 
             logModuleCall(
                 'authentik',
                 'SendEmail',
                 [
                     'templateName' => $templateName,
-                    'clientId' => $clientId
+                    'clientId' => $clientId,
+                    'templateVars' => $templateVars  // Log the variables we're sending
                 ],
                 'Email notification sent to client',
                 null
