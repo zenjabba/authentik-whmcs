@@ -256,11 +256,10 @@ function authentik_CreateAccount(array $params) {
 
         $groupId = $groups['results'][0]['pk'];
 
-        // Add user to group
-        $addToGroupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/' . $groupId . '/users/';
-        
+        // Add user to group using the correct API endpoint
+        $addToGroupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/' . $groupId . '/add_user/';
         $groupData = [
-            'user' => $userId
+            'pk' => $userId
         ];
 
         // Log group assignment request
