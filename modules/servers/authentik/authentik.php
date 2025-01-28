@@ -325,34 +325,33 @@ function authentik_CreateAccount(array $params) {
                 null
             );
 
-            // Send email to client with their Authentik credentials
-            $clientId = $params['clientsdetails']['userid'];
-            $templateName = 'Authentik Welcome Email';
-            $templateVars = [
-                'client_name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
-                'username' => $username,
-                'password' => $password,
-                'authentik_url' => rtrim($baseUrl, '/'),
-                'service_id' => $params['serviceid'],
-                'service_product' => $params['configoption1'],
-                'client_id' => $clientId,
-            ];
-
-            // Use WHMCS's sendMessage function with proper template variables
-            sendMessage($templateName, $clientId, $templateVars, true);  // Added true for admin notification
-
-            logModuleCall(
-                'authentik',
-                'SendEmail',
-                [
-                    'templateName' => $templateName,
-                    'clientId' => $clientId,
-                    'templateVars' => $templateVars  // Log the variables we're sending
-                ],
-                'Email notification sent to client',
-                null
-            );
-
+            // Send welcome email with credentials
+            $templateFile = dirname(__FILE__) . '/../../../email_template.txt';
+            if (file_exists($templateFile)) {
+                $emailTemplate = file_get_contents($templateFile);
+                
+                // Replace placeholders
+                $replacements = [
+                    '{$client_name}' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
+                    '{$authentik_url}' => rtrim($baseUrl, '/'),
+                    '{$username}' => $username,
+                    '{$password}' => $password,
+                ];
+                
+                $emailContent = str_replace(array_keys($replacements), array_values($replacements), $emailTemplate);
+                
+                // Send email
+                $postData = [
+                    'messagename' => 'Authentik Account Details',
+                    'id' => $params['serviceid'],
+                    'customtype' => 'product',
+                    'customsubject' => 'Your Authentik Account Details',
+                    'custommessage' => $emailContent,
+                ];
+                
+                localAPI('SendEmail', $postData);
+            }
+            
             return 'success';
         }
 
