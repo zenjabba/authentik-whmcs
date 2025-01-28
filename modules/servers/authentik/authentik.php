@@ -17,6 +17,20 @@ use WHMCS\Database\Capsule;
 require_once __DIR__ . '/helpers.php';
 
 /**
+ * Module metadata.
+ *
+ * @return array
+ */
+function authentik_MetaData()
+{
+    return array(
+        'DisplayName' => 'Authentik',
+        'APIVersion' => '1.1',
+        'RequiresServer' => true
+    );
+}
+
+/**
  * Define module configuration options
  *
  * @return array Module configuration options
