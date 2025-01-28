@@ -128,7 +128,7 @@ function authentik_CreateAccount(array $params) {
             'name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
             'password' => $password,  // Use unencrypted password for Authentik
             'is_active' => true,
-            'path' => '/if/flow/initial-setup/',  // Force user to set up 2FA
+            'path' => 'if/flow/initial-setup',  // Remove leading/trailing slashes
             'attributes' => [
                 'settings' => [
                     'mfa_required' => true,  // Require 2FA
