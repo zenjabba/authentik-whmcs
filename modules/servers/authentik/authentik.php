@@ -505,7 +505,7 @@ function authentik_TerminateAccount(array $params) {
         );
 
         // First, get the user ID
-        $userUrl = $baseUrl . '/api/v3/core/users/?username=' . urlencode($username);
+        $userUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/?username=' . urlencode($username);
         
         $ch = curl_init();
         curl_setopt_array($ch, [
@@ -521,35 +521,37 @@ function authentik_TerminateAccount(array $params) {
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
+        $userData = json_decode($response, true);
+        
+        // Log the user search response
         logModuleCall(
             'authentik',
-            'GetUser',
-            $userUrl,
-            $response,
-            "HTTP Code: {$httpCode}"
+            'FindUser',
+            [
+                'url' => $userUrl,
+                'response' => $userData,
+                'httpCode' => $httpCode
+            ],
+            'Searching for user',
+            null
         );
 
-        if ($httpCode !== 200) {
-            return 'Failed to find user: ' . $response;
+        if (!isset($userData['results']) || empty($userData['results'])) {
+            throw new Exception('Failed to find user: ' . $username);
         }
 
-        $users = json_decode($response, true);
-        if (empty($users['results'])) {
-            return 'User not found';
-        }
+        $userId = $userData['results'][0]['pk'];
 
-        $userId = $users['results'][0]['pk'];
-
-        // Delete the user
-        $deleteUrl = $baseUrl . '/api/v3/core/users/' . $userId . '/';
-
+        // Now delete the user
+        $deleteUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/' . $userId . '/';
+        
         $ch = curl_init();
         curl_setopt_array($ch, [
             CURLOPT_URL => $deleteUrl,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_CUSTOMREQUEST => 'DELETE',
             CURLOPT_HTTPHEADER => [
-                'Authorization: Bearer ' . $token,
+                'Authorization: Bearer ' . $token
             ]
         ]);
 
@@ -557,19 +559,25 @@ function authentik_TerminateAccount(array $params) {
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
+        // Log the deletion response
         logModuleCall(
             'authentik',
             'DeleteUser',
-            $deleteUrl,
-            $response,
-            "HTTP Code: {$httpCode}"
+            [
+                'url' => $deleteUrl,
+                'httpCode' => $httpCode,
+                'response' => $response
+            ],
+            'User deletion response',
+            null
         );
 
         if ($httpCode === 204 || $httpCode === 200) {
             return 'success';
         }
 
-        return 'Failed to delete user: ' . $response;
+        throw new Exception('Failed to delete user. HTTP Code: ' . $httpCode . ($response ? ". Response: " . $response : ""));
+
     } catch (Exception $e) {
         logModuleCall(
             'authentik',
