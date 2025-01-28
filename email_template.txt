@@ -1,18 +1,16 @@
-<p>Dear {$client_name},</p>
+Dear {$client_name},
 
-<p>Your Authentik account has been successfully created.</p>
+Your Authentik account has been successfully created.
 
-<p>You can access your account using the following details:</p>
+You can access your account using the following details:
 
-<ul>
-    <li>URL: {$authentik_url}</li>
-    <li>Username: {$username}</li>
-    <li>Password: {$password}</li>
-</ul>
+URL: {$authentik_url}
+Username: {$username}
+Password: {$password}
 
-<p>For security reasons, we recommend changing your password after your first login.</p>
+For security reasons, we recommend changing your password after your first login.
 
-<p>If you have any questions or need assistance, please don't hesitate to contact our support team.</p>
+If you have any questions or need assistance, please don't hesitate to contact our support team.
 
-<p>Best regards,<br>
-Your Support Team</p>
+Best regards,
+Your Support Team

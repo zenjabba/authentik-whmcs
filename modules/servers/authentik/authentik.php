@@ -85,12 +85,12 @@ function authentik_CreateAccount(array $params) {
         // Generate a secure random password
         $password = generateStrongPassword();
 
-        // Store credentials in tblhosting
+        // Store credentials in tblhosting (encrypt password for storage)
         Capsule::table('tblhosting')
             ->where('id', $params['serviceid'])
             ->update([
                 'username' => $username,
-                'password' => encrypt($password)
+                'password' => encrypt($password)  // Encrypt for storage
             ]);
 
         // Log the final username being used
@@ -126,17 +126,17 @@ function authentik_CreateAccount(array $params) {
             'username' => $username,
             'email' => $params['clientsdetails']['email'],
             'name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
-            'password' => $password,
+            'password' => $password,  // Use unencrypted password for Authentik
             'is_active' => true
         ];
 
-        // Log the user creation request
+        // Log the user creation request (mask password in logs)
         logModuleCall(
             'authentik',
             'CreateUser_Request',
             [
                 'url' => $createUserUrl,
-                'data' => $userData
+                'data' => array_merge($userData, ['password' => '********'])
             ],
             'Attempting to create user',
             null
@@ -160,14 +160,13 @@ function authentik_CreateAccount(array $params) {
         $curlError = curl_error($ch);
         curl_close($ch);
 
-        // Log the user creation response
+        // Log the response (without sensitive data)
         logModuleCall(
             'authentik',
             'CreateUser_Response',
             [
                 'httpCode' => $httpCode,
-                'response' => $response,
-                'curlError' => $curlError
+                'response' => $response
             ],
             'User creation response received',
             null
@@ -325,32 +324,30 @@ function authentik_CreateAccount(array $params) {
                 null
             );
 
-            // Send welcome email with credentials
-            $templateFile = dirname(__FILE__) . '/../../../email_template.txt';
-            if (file_exists($templateFile)) {
-                $emailTemplate = file_get_contents($templateFile);
-                
-                // Replace placeholders
-                $replacements = [
-                    '{$client_name}' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
-                    '{$authentik_url}' => rtrim($baseUrl, '/'),
-                    '{$username}' => $username,
-                    '{$password}' => $password,
-                ];
-                
-                $emailContent = str_replace(array_keys($replacements), array_values($replacements), $emailTemplate);
-                
-                // Send email
-                $postData = [
-                    'messagename' => 'Authentik Account Details',
-                    'id' => $params['serviceid'],
-                    'customtype' => 'product',
-                    'customsubject' => 'Your Authentik Account Details',
-                    'custommessage' => $emailContent,
-                ];
-                
-                localAPI('SendEmail', $postData);
-            }
+            // Send welcome email with credentials (use unencrypted password)
+            $command = 'SendEmail';
+            $values = array(
+                'messagename' => 'Authentik Account Details',
+                'id' => $params['serviceid'],
+                'customtype' => 'product',
+                'customsubject' => 'Your Authentik Account Details',
+                'customvars' => base64_encode(serialize(array(
+                    'client_name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
+                    'authentik_url' => rtrim($baseUrl, '/'),
+                    'username' => $username,
+                    'password' => $password,  // Use unencrypted password for email
+                ))),
+            );
+
+            $results = localAPI($command, $values);
+            
+            logModuleCall(
+                'authentik',
+                'SendEmail',
+                array_merge($values, ['customvars' => '********']),  // Mask sensitive data in logs
+                $results,
+                'Sending welcome email'
+            );
             
             return 'success';
         }
