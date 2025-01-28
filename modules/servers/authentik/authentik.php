@@ -82,41 +82,38 @@ function authentik_CreateAccount(array $params) {
         // Generate unique username
         $username = generateUniqueUsername($params);
 
+        // Generate a new password using WHMCS's functionality
+        $password = generateFriendlyPassword();  // This is a WHMCS function
+
+        // Update WHMCS with the new password
+        Capsule::table('tblhosting')
+            ->where('id', $params['serviceid'])
+            ->update([
+                'username' => $username,
+                'password' => encrypt($password)  // Use WHMCS's encrypt function
+            ]);
+
         // Log all available password-related fields (safely)
         logModuleCall(
             'authentik',
             'PasswordDebug',
             [
-                'params_password' => !empty($params['password']) ? 'SET (' . strlen($params['password']) . ' chars)' : 'EMPTY',
-                'params_password_raw' => $params['password'],  // We'll only log this during debugging
-                'params_keys' => array_keys($params),
-                'customfields' => isset($params['customfields']) ? $params['customfields'] : 'not set'
+                'password_length' => strlen($password),
+                'password_is_set' => !empty($password),
+                'is_generated' => true
             ],
-            'Checking password sources',
+            'Generated new password',
             null
         );
-        
-        // Use WHMCS-provided password
-        $password = $params['password'];
-
-        // Store username in WHMCS
-        Capsule::table('tblhosting')
-            ->where('id', $params['serviceid'])
-            ->update([
-                'username' => $username
-            ]);
 
         // Create user in Authentik
         $createUserUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/';
-        
-        // Ensure password is properly encoded for JSON
-        $encodedPassword = str_replace('"', '\"', $password);
         
         $userData = [
             'username' => $username,
             'email' => $params['clientsdetails']['email'],
             'name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
-            'password' => $encodedPassword,
+            'password' => $password,
             'is_active' => true,
             'path' => 'if/flow/initial-setup',
             'attributes' => [
@@ -132,12 +129,9 @@ function authentik_CreateAccount(array $params) {
             'authentik',
             'CreateUser_PasswordVerification',
             [
-                'password_to_authentik' => $userData['password'],
                 'password_length' => strlen($userData['password']),
                 'password_empty' => empty($userData['password']),
-                'password_null' => is_null($userData['password']),
-                'password_json' => json_encode(['password' => $userData['password']]),
-                'password_raw_json' => json_encode(['password' => $password])
+                'password_null' => is_null($userData['password'])
             ],
             'Verifying password being sent to Authentik',
             null
@@ -145,19 +139,6 @@ function authentik_CreateAccount(array $params) {
 
         // Create user API call with explicit JSON encoding
         $jsonData = json_encode($userData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        
-        // Log the exact JSON being sent
-        logModuleCall(
-            'authentik',
-            'CreateUser_JsonVerification',
-            [
-                'json_data' => $jsonData,
-                'json_last_error' => json_last_error(),
-                'json_last_error_msg' => json_last_error_msg()
-            ],
-            'Verifying JSON data being sent',
-            null
-        );
 
         $ch = curl_init();
         curl_setopt_array($ch, [
@@ -269,22 +250,8 @@ function authentik_CreateAccount(array $params) {
                     'client_name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
                     'authentik_url' => rtrim($baseUrl, '/'),
                     'service_username' => $username,
-                    'service_password' => $params['password'], // Use original password parameter
+                    'service_password' => $password,  // Use our generated password
                 ))),
-            );
-
-            // Log email password verification
-            logModuleCall(
-                'authentik',
-                'Email_PasswordVerification',
-                [
-                    'email_password' => $params['password'],  // We'll only log this during debugging
-                    'password_length' => strlen($params['password']),
-                    'password_empty' => empty($params['password']),
-                    'password_null' => is_null($params['password'])
-                ],
-                'Verifying password being sent in email',
-                null
             );
 
             $results = localAPI($command, $postData);
