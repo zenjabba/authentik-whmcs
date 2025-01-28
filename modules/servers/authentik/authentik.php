@@ -109,11 +109,14 @@ function authentik_CreateAccount(array $params) {
         // Create user in Authentik
         $createUserUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/';
         
+        // Ensure password is properly encoded for JSON
+        $encodedPassword = str_replace('"', '\"', $password);
+        
         $userData = [
             'username' => $username,
             'email' => $params['clientsdetails']['email'],
             'name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
-            'password' => $password,
+            'password' => $encodedPassword,
             'is_active' => true,
             'path' => 'if/flow/initial-setup',
             'attributes' => [
@@ -129,34 +132,39 @@ function authentik_CreateAccount(array $params) {
             'authentik',
             'CreateUser_PasswordVerification',
             [
-                'password_to_authentik' => $userData['password'],  // We'll only log this during debugging
+                'password_to_authentik' => $userData['password'],
                 'password_length' => strlen($userData['password']),
                 'password_empty' => empty($userData['password']),
-                'password_null' => is_null($userData['password'])
+                'password_null' => is_null($userData['password']),
+                'password_json' => json_encode(['password' => $userData['password']]),
+                'password_raw_json' => json_encode(['password' => $password])
             ],
             'Verifying password being sent to Authentik',
             null
         );
 
-        // Log the user creation request (mask password in logs)
+        // Create user API call with explicit JSON encoding
+        $jsonData = json_encode($userData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        
+        // Log the exact JSON being sent
         logModuleCall(
             'authentik',
-            'CreateUser_Request',
+            'CreateUser_JsonVerification',
             [
-                'url' => $createUserUrl,
-                'data' => array_merge($userData, ['password' => '********'])
+                'json_data' => $jsonData,
+                'json_last_error' => json_last_error(),
+                'json_last_error_msg' => json_last_error_msg()
             ],
-            'Attempting to create user',
+            'Verifying JSON data being sent',
             null
         );
 
-        // Create user API call
         $ch = curl_init();
         curl_setopt_array($ch, [
             CURLOPT_URL => $createUserUrl,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => json_encode($userData),
+            CURLOPT_POSTFIELDS => $jsonData,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $token,
                 'Content-Type: application/json'
