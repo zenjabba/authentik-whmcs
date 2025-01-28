@@ -85,54 +85,29 @@ function authentik_CreateAccount(array $params) {
         // Generate a secure random password
         $password = generateStrongPassword();
 
-        // Store credentials in tblhosting (encrypt password for storage)
+        // Store credentials in tblhosting without encryption
+        // WHMCS will handle the encryption internally
         Capsule::table('tblhosting')
             ->where('id', $params['serviceid'])
             ->update([
                 'username' => $username,
-                'password' => encrypt($password)  // Encrypt for storage
+                'password' => $password  // WHMCS will encrypt this automatically
             ]);
 
-        // Log the final username being used
-        logModuleCall(
-            'authentik',
-            'CreateAccount_Username',
-            [
-                'username' => $username
-            ],
-            'Starting account creation with generated username',
-            null
-        );
-
-        // Debug initial parameters
-        logModuleCall(
-            'authentik',
-            'CreateAccount_InitialParams',
-            [
-                'baseUrl' => $baseUrl,
-                'username' => $username,
-                'groupName' => $groupName,
-                'email' => $params['clientsdetails']['email'],
-                'fullParams' => $params
-            ],
-            'Starting user creation process',
-            null
-        );
-        
-        // First create the user
+        // Create user in Authentik
         $createUserUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/';
         
         $userData = [
             'username' => $username,
             'email' => $params['clientsdetails']['email'],
             'name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
-            'password' => $password,  // Use unencrypted password for Authentik
+            'password' => $password,
             'is_active' => true,
-            'path' => 'if/flow/initial-setup',  // Remove leading/trailing slashes
+            'path' => 'if/flow/initial-setup',
             'attributes' => [
                 'settings' => [
-                    'mfa_required' => true,  // Require 2FA
-                    'mfa_method_preferred' => 'totp'  // Default to TOTP (Time-based One-Time Password)
+                    'mfa_required' => true,
+                    'mfa_method_preferred' => 'totp'
                 ]
             ]
         ];
@@ -164,7 +139,6 @@ function authentik_CreateAccount(array $params) {
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
         curl_close($ch);
 
         // Log the response (without sensitive data)
@@ -180,40 +154,23 @@ function authentik_CreateAccount(array $params) {
         );
 
         if ($httpCode !== 201) {
-            logModuleCall(
-                'authentik',
-                'CreateUser_Error',
-                [
-                    'httpCode' => $httpCode,
-                    'response' => $response
-                ],
-                'Failed to create user',
-                null
-            );
-            return 'Failed to create user. HTTP Code: ' . $httpCode . '. Response: ' . $response;
+            throw new Exception('Failed to create user: ' . $response);
         }
 
-        $createdUser = json_decode($response, true);
-        $userId = $createdUser['pk'];
+        // Get the user ID from the response
+        $userData = json_decode($response, true);
+        if (!isset($userData['pk'])) {
+            throw new Exception('Invalid response from Authentik API');
+        }
 
-        // Now get the group ID
-        $groupsUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/?name=' . urlencode($groupName);
+        $userId = $userData['pk'];
+
+        // Now add user to group
+        $groupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/?name=' . urlencode($groupName);
         
-        // Log group lookup request
-        logModuleCall(
-            'authentik',
-            'LookupGroup_Request',
-            [
-                'url' => $groupsUrl,
-                'groupName' => $groupName
-            ],
-            'Attempting to find group',
-            null
-        );
-
         $ch = curl_init();
         curl_setopt_array($ch, [
-            CURLOPT_URL => $groupsUrl,
+            CURLOPT_URL => $groupUrl,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $token,
@@ -223,70 +180,18 @@ function authentik_CreateAccount(array $params) {
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
         curl_close($ch);
 
-        // Log group lookup response
-        logModuleCall(
-            'authentik',
-            'LookupGroup_Response',
-            [
-                'httpCode' => $httpCode,
-                'response' => $response,
-                'curlError' => $curlError
-            ],
-            'Group lookup response received',
-            null
-        );
-
-        if ($httpCode !== 200) {
-            logModuleCall(
-                'authentik',
-                'LookupGroup_Error',
-                [
-                    'httpCode' => $httpCode,
-                    'response' => $response
-                ],
-                'Failed to find group',
-                null
-            );
-            return "Failed to find group. HTTP Code: " . $httpCode . ". Response: " . $response;
-        }
-
         $groups = json_decode($response, true);
-        if (empty($groups['results'])) {
-            logModuleCall(
-                'authentik',
-                'LookupGroup_NotFound',
-                [
-                    'groupName' => $groupName,
-                    'response' => $response
-                ],
-                'Group not found in results',
-                null
-            );
-            return "Group '{$groupName}' not found";
+        if (!isset($groups['results']) || empty($groups['results'])) {
+            throw new Exception("Group '{$groupName}' not found");
         }
 
         $groupId = $groups['results'][0]['pk'];
 
-        // Add user to group using the correct API endpoint
-        $addToGroupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/' . $groupId . '/add_user/';
-        $groupData = [
-            'pk' => $userId
-        ];
-
-        // Log group assignment request
-        logModuleCall(
-            'authentik',
-            'AddToGroup_Request',
-            [
-                'url' => $addToGroupUrl,
-                'data' => $groupData
-            ],
-            'Attempting to add user to group',
-            null
-        );
+        // Add user to group
+        $addToGroupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/' . $groupId . '/users/';
+        $groupData = ['pk' => $userId];
 
         $ch = curl_init();
         curl_setopt_array($ch, [
@@ -302,121 +207,24 @@ function authentik_CreateAccount(array $params) {
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $curlError = curl_error($ch);
         curl_close($ch);
 
-        // Log group assignment response
         logModuleCall(
             'authentik',
-            'AddToGroup_Response',
+            'AddUserToGroup',
             [
-                'httpCode' => $httpCode,
-                'response' => $response,
-                'curlError' => $curlError
+                'url' => $addToGroupUrl,
+                'userId' => $userId,
+                'groupId' => $groupId
             ],
-            'Group assignment response received',
-            null
+            $response,
+            "HTTP Code: {$httpCode}"
         );
 
-        // HTTP 204 means success with no content, which is normal for this operation
-        if ($httpCode === 204 || $httpCode === 200 || $httpCode === 201) {
-            logModuleCall(
-                'authentik',
-                'CreateAccount_Success',
-                [
-                    'userId' => $userId,
-                    'groupId' => $groupId
-                ],
-                'Successfully created user and added to group',
-                null
-            );
-
-            // Create a policy binding for 2FA requirement
-            $policyUrl = rtrim($baseUrl, '/') . '/api/v3/policies/bindings/';
-            
-            $policyData = [
-                'policy' => [
-                    'name' => 'require-2fa-' . $username,
-                    'execution_logging' => true,
-                    'component' => 'authentik_stages_authenticator_validate',
-                    'pbm' => 'any'
-                ],
-                'group' => $groupId,
-                'enabled' => true,
-                'order' => 0,
-                'timeout' => 30,
-                'failure_result' => false
-            ];
-
-            $ch = curl_init();
-            curl_setopt_array($ch, [
-                CURLOPT_URL => $policyUrl,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_POST => true,
-                CURLOPT_POSTFIELDS => json_encode($policyData),
-                CURLOPT_HTTPHEADER => [
-                    'Authorization: Bearer ' . $token,
-                    'Content-Type: application/json'
-                ]
-            ]);
-
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-
-            logModuleCall(
-                'authentik',
-                'CreatePolicyBinding',
-                [
-                    'url' => $policyUrl,
-                    'data' => $policyData
-                ],
-                $response,
-                "HTTP Code: {$httpCode}"
-            );
-
-            // Set user attributes to require 2FA
-            $userUpdateUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/' . $userId . '/';
-            
-            $updateData = [
-                'attributes' => [
-                    'settings' => [
-                        'mfa_required' => true,
-                        'mfa_method_preferred' => 'totp'
-                    ]
-                ]
-            ];
-
-            $ch = curl_init();
-            curl_setopt_array($ch, [
-                CURLOPT_URL => $userUpdateUrl,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CUSTOMREQUEST => 'PATCH',
-                CURLOPT_POSTFIELDS => json_encode($updateData),
-                CURLOPT_HTTPHEADER => [
-                    'Authorization: Bearer ' . $token,
-                    'Content-Type: application/json'
-                ]
-            ]);
-
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-
-            logModuleCall(
-                'authentik',
-                'UpdateUser2FASettings',
-                [
-                    'url' => $userUpdateUrl,
-                    'data' => $updateData
-                ],
-                $response,
-                "HTTP Code: {$httpCode}"
-            );
-
-            // Send welcome email with credentials (use unencrypted password)
+        if ($httpCode === 204 || $httpCode === 200) {
+            // Send welcome email with credentials
             $command = 'SendEmail';
-            $values = array(
+            $postData = array(
                 'messagename' => 'Authentik Account Details',
                 'id' => $params['serviceid'],
                 'customtype' => 'product',
@@ -425,16 +233,16 @@ function authentik_CreateAccount(array $params) {
                     'client_name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
                     'authentik_url' => rtrim($baseUrl, '/'),
                     'username' => $username,
-                    'password' => $password,  // Use unencrypted password for email
+                    'password' => $password,
                 ))),
             );
 
-            $results = localAPI($command, $values);
+            $results = localAPI($command, $postData);
             
             logModuleCall(
                 'authentik',
                 'SendEmail',
-                array_merge($values, ['customvars' => '********']),  // Mask sensitive data in logs
+                array_merge($postData, ['customvars' => '********']),
                 $results,
                 'Sending welcome email'
             );
@@ -442,18 +250,7 @@ function authentik_CreateAccount(array $params) {
             return 'success';
         }
 
-        logModuleCall(
-            'authentik',
-            'AddToGroup_Error',
-            [
-                'httpCode' => $httpCode,
-                'response' => $response
-            ],
-            'Failed to add user to group',
-            null
-        );
-
-        return "Failed to add user to group. HTTP Code: " . $httpCode . ($response ? ". Response: " . $response : "");
+        throw new Exception("Failed to add user to group. HTTP Code: " . $httpCode . ($response ? ". Response: " . $response : ""));
 
     } catch (Exception $e) {
         logModuleCall(
