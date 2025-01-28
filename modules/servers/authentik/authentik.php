@@ -626,7 +626,7 @@ function authentik_SuspendAccount(array $params) {
         );
 
         // First, get the user ID
-        $userUrl = $baseUrl . '/api/v3/core/users/?username=' . urlencode($username);
+        $userUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/?username=' . urlencode($username);
         
         $ch = curl_init();
         curl_setopt_array($ch, [
@@ -642,31 +642,33 @@ function authentik_SuspendAccount(array $params) {
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
+        $userData = json_decode($response, true);
+        
+        // Log the user search response
         logModuleCall(
             'authentik',
-            'GetUser',
-            $userUrl,
-            $response,
-            "HTTP Code: {$httpCode}"
+            'FindUser',
+            [
+                'url' => $userUrl,
+                'response' => $userData,
+                'httpCode' => $httpCode
+            ],
+            'Searching for user',
+            null
         );
 
-        if ($httpCode !== 200) {
-            return 'Failed to find user: ' . $response;
+        if (!isset($userData['results']) || empty($userData['results'])) {
+            throw new Exception('Failed to find user: ' . $username);
         }
 
-        $users = json_decode($response, true);
-        if (empty($users['results'])) {
-            return 'User not found';
-        }
-
-        $userId = $users['results'][0]['pk'];
+        $userId = $userData['results'][0]['pk'];
 
         // Get the group ID
-        $groupsUrl = $baseUrl . '/api/v3/core/groups/?name=' . urlencode($groupName);
+        $groupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/?name=' . urlencode($groupName);
         
         $ch = curl_init();
         curl_setopt_array($ch, [
-            CURLOPT_URL => $groupsUrl,
+            CURLOPT_URL => $groupUrl,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $token,
@@ -678,27 +680,29 @@ function authentik_SuspendAccount(array $params) {
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
+        $groups = json_decode($response, true);
+        
+        // Log the group search response
         logModuleCall(
             'authentik',
-            'GetGroup',
-            $groupsUrl,
-            $response,
-            "HTTP Code: {$httpCode}"
+            'FindGroup',
+            [
+                'url' => $groupUrl,
+                'response' => $groups,
+                'httpCode' => $httpCode
+            ],
+            'Searching for group',
+            null
         );
 
-        if ($httpCode !== 200) {
-            return "Failed to find group '{$groupName}': " . $response;
-        }
-
-        $groups = json_decode($response, true);
-        if (empty($groups['results'])) {
-            return "Group '{$groupName}' not found";
+        if (!isset($groups['results']) || empty($groups['results'])) {
+            throw new Exception("Group '{$groupName}' not found");
         }
 
         $groupId = $groups['results'][0]['pk'];
 
         // Remove user from group
-        $removeFromGroupUrl = $baseUrl . '/api/v3/core/groups/' . $groupId . '/users/' . $userId . '/';
+        $removeFromGroupUrl = rtrim($baseUrl, '/') . '/api/v3/core/groups/' . $groupId . '/users/' . $userId . '/';
         
         $ch = curl_init();
         curl_setopt_array($ch, [
@@ -707,6 +711,7 @@ function authentik_SuspendAccount(array $params) {
             CURLOPT_CUSTOMREQUEST => 'DELETE',
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $token,
+                'Content-Type: application/json'
             ]
         ]);
 
@@ -714,19 +719,25 @@ function authentik_SuspendAccount(array $params) {
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
+        // Log the removal response
         logModuleCall(
             'authentik',
             'RemoveUserFromGroup',
-            $removeFromGroupUrl,
-            $response,
-            "HTTP Code: {$httpCode}"
+            [
+                'url' => $removeFromGroupUrl,
+                'httpCode' => $httpCode,
+                'response' => $response
+            ],
+            'User removal from group response',
+            null
         );
 
         if ($httpCode === 204 || $httpCode === 200) {
             return 'success';
         }
 
-        return "Failed to remove user from group '{$groupName}': " . $response;
+        throw new Exception("Failed to remove user from group '{$groupName}'. HTTP Code: " . $httpCode . ($response ? ". Response: " . $response : ""));
+
     } catch (Exception $e) {
         logModuleCall(
             'authentik',
