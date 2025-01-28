@@ -1,3 +1,4 @@
+<?php
 /**
  * Authentik WHMCS Provisioning Module
  *
@@ -11,6 +12,10 @@
  * @license    Your License
  * @version    1.0
  */
+
+if (!defined("WHMCS")) {
+    die("This file cannot be accessed directly");
+}
 
 use WHMCS\Database\Capsule;
 
