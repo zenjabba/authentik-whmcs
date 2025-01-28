@@ -127,7 +127,14 @@ function authentik_CreateAccount(array $params) {
             'email' => $params['clientsdetails']['email'],
             'name' => $params['clientsdetails']['firstname'] . ' ' . $params['clientsdetails']['lastname'],
             'password' => $password,  // Use unencrypted password for Authentik
-            'is_active' => true
+            'is_active' => true,
+            'path' => '/if/flow/initial-setup/',  // Force user to set up 2FA
+            'attributes' => [
+                'settings' => [
+                    'mfa_required' => true,  // Require 2FA
+                    'mfa_method_preferred' => 'totp'  // Default to TOTP (Time-based One-Time Password)
+                ]
+            ]
         ];
 
         // Log the user creation request (mask password in logs)
