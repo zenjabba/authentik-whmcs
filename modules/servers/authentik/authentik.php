@@ -81,6 +81,20 @@ function authentik_CreateAccount(array $params) {
         
         // Generate unique username
         $username = generateUniqueUsername($params);
+
+        // Log all available password-related fields (safely)
+        logModuleCall(
+            'authentik',
+            'PasswordDebug',
+            [
+                'params_password' => !empty($params['password']) ? 'SET (' . strlen($params['password']) . ' chars)' : 'EMPTY',
+                'params_password_raw' => $params['password'],  // We'll only log this during debugging
+                'params_keys' => array_keys($params),
+                'customfields' => isset($params['customfields']) ? $params['customfields'] : 'not set'
+            ],
+            'Checking password sources',
+            null
+        );
         
         // Use WHMCS-provided password
         $password = $params['password'];
@@ -109,6 +123,20 @@ function authentik_CreateAccount(array $params) {
                 ]
             ]
         ];
+
+        // Log what we're sending to Authentik (safely)
+        logModuleCall(
+            'authentik',
+            'CreateUser_PasswordVerification',
+            [
+                'password_to_authentik' => $userData['password'],  // We'll only log this during debugging
+                'password_length' => strlen($userData['password']),
+                'password_empty' => empty($userData['password']),
+                'password_null' => is_null($userData['password'])
+            ],
+            'Verifying password being sent to Authentik',
+            null
+        );
 
         // Log the user creation request (mask password in logs)
         logModuleCall(
@@ -222,18 +250,6 @@ function authentik_CreateAccount(array $params) {
         );
 
         if ($httpCode === 204 || $httpCode === 200 || $httpCode === 201) {
-            // Log the actual password being used (masked)
-            logModuleCall(
-                'authentik',
-                'PasswordVerification',
-                [
-                    'password_length' => strlen($password),
-                    'password_is_set' => !empty($password)
-                ],
-                'Verifying password before email',
-                null
-            );
-
             // Send welcome email with credentials
             $command = 'SendEmail';
             $postData = array(
@@ -247,6 +263,20 @@ function authentik_CreateAccount(array $params) {
                     'service_username' => $username,
                     'service_password' => $params['password'], // Use original password parameter
                 ))),
+            );
+
+            // Log email password verification
+            logModuleCall(
+                'authentik',
+                'Email_PasswordVerification',
+                [
+                    'email_password' => $params['password'],  // We'll only log this during debugging
+                    'password_length' => strlen($params['password']),
+                    'password_empty' => empty($params['password']),
+                    'password_null' => is_null($params['password'])
+                ],
+                'Verifying password being sent in email',
+                null
             );
 
             $results = localAPI($command, $postData);
