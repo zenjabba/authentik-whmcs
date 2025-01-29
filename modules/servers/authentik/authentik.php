@@ -603,4 +603,31 @@ function authentik_SuspendAccount(array $params) {
     }
 }
 
+/**
+ * Client Area Output
+ *
+ * @param array $params
+ * @return array
+ */
+function authentik_ClientArea($params) {
+    $serviceId = $params['serviceid'];
+    
+    // Get service details from database
+    $service = Capsule::table('tblhosting')
+        ->where('id', $serviceId)
+        ->first();
+    
+    // Get Authentik instance URL
+    $authentikUrl = $params['configoption1'];
+    
+    return [
+        'tabOverviewReplacementTemplate' => 'templates/overview.tpl',
+        'templateVariables' => [
+            'username' => $service->username,
+            'password' => decrypt($service->password),
+            'authentik_url' => $authentikUrl
+        ]
+    ];
+}
+
 // End of file
