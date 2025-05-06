@@ -604,6 +604,94 @@ function authentik_SuspendAccount(array $params) {
 }
 
 /**
+ * Unsuspend a user account in Authentik
+ *
+ * This function is called when a service is unsuspended in WHMCS.
+ * It re-enables the user in Authentik.
+ *
+ * @param array $params Module configuration parameters
+ * @return string Success or error message
+ */
+function authentik_UnsuspendAccount(array $params) {
+    try {
+        $baseUrl = $params['configoption1'];
+        $token = $params['configoption2'];
+        
+        // Get the stored username from tblhosting
+        $username = Capsule::table('tblhosting')
+            ->where('id', $params['serviceid'])
+            ->value('username');
+
+        if (!$username) {
+            throw new Exception('Could not find stored username for service');
+        }
+
+        // Find the user ID
+        $userUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/?username=' . urlencode($username);
+        
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $userUrl,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json'
+            ]
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        $userData = json_decode($response, true);
+        
+        if (!isset($userData['results']) || empty($userData['results'])) {
+            throw new Exception('Failed to find user: ' . $username);
+        }
+
+        $userId = $userData['results'][0]['pk'];
+
+        // Re-enable the user
+        $updateUrl = rtrim($baseUrl, '/') . '/api/v3/core/users/' . $userId . '/';
+        
+        $updateData = [
+            'is_active' => true
+        ];
+
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $updateUrl,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CUSTOMREQUEST => 'PATCH',
+            CURLOPT_POSTFIELDS => json_encode($updateData),
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $token,
+                'Content-Type: application/json'
+            ]
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode === 200) {
+            return 'success';
+        }
+
+        throw new Exception("Failed to re-enable user. HTTP Code: " . $httpCode . ($response ? ". Response: " . $response : ""));
+
+    } catch (Exception $e) {
+        logModuleCall(
+            'authentik',
+            'Error',
+            $e->getMessage(),
+            $e->getTraceAsString()
+        );
+        return 'Error: ' . $e->getMessage();
+    }
+}
+
+/**
  * Client Area Output
  *
  * @param array $params
